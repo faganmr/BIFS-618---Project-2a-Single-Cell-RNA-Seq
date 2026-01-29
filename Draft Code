@@ -1,0 +1,99 @@
+# Core scverse libraries
+from __future__ import annotations
+
+#Import Packages
+import anndata as ad
+import scanpy as sc
+import scrublet as scr
+
+#Choose directory to save graphs
+sc.settings.figdir = "/home/tyler/sc_data/figures"
+sc.settings.autosave = True
+sc.settings.autoshow = False
+
+#Use SC conda environment
+import sys
+print(sys.executable)
+
+#Select resoultion and background color
+sc.settings.set_figure_params(dpi=50, facecolor="white")
+
+# LOAD LOCAL 10x DATA (PBMC3k)
+adata = sc.datasets.pbmc3k()
+print(adata)
+
+# Add a sample label so the rest of your code works unchanged
+adata.obs["sample"] = "pbmc3k"
+adata.obs["sample"] = adata.obs["sample"].astype("category")
+
+print(adata)
+print(adata.obs["sample"].value_counts())
+
+# QUALITY CONTROL
+adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
+adata.var["ribo"] = adata.var_names.str.upper().str.startswith(("RPS", "RPL"))
+adata.var["hb"] = adata.var_names.str.contains(r"^HB(?!P)", regex=True)
+
+sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo", "hb"], inplace=True, log1p=True)
+
+sc.pl.violin(
+    adata,
+    ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
+    jitter=0.4,
+    multi_panel=True,
+)
+
+sc.pl.scatter(adata, "total_counts", "n_genes_by_counts", color="pct_counts_mt")
+
+sc.pp.filter_cells(adata, min_genes=100)
+sc.pp.filter_genes(adata, min_cells=3)
+
+# DOUBLETS 
+sc.pp.scrublet(adata, batch_key="sample")
+
+# NORMALIZATION
+adata.layers["counts"] = adata.X.copy()
+sc.pp.normalize_total(adata)
+sc.pp.log1p(adata)
+
+print("Normalization Complete")
+
+# FEATURE SELECTION
+sc.pp.highly_variable_genes(adata, n_top_genes=2000, batch_key="sample")
+sc.pl.highly_variable_genes(adata)
+
+print("Feature Selection Complete")
+
+# PCA / UMAP / CLUSTERING
+sc.tl.pca(adata)
+sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True)
+
+sc.pp.neighbors(adata)
+sc.tl.umap(adata)
+
+sc.pl.umap(adata, color="sample", size=2)
+print("Neighbors/UMAP Complete")
+
+sc.tl.leiden(adata, flavor="igraph", n_iterations=2)
+sc.pl.umap(adata, color=["leiden"])
+print("Clustering Complete")
+
+# PLOTS 
+cols = ["leiden"]
+for c in ["predicted_doublet", "doublet_score"]:
+    if c in adata.obs.columns:
+        cols.append(c)
+
+sc.pl.umap(adata, color=cols, wspace=0.5, size=3)
+
+sc.pl.umap(
+    adata,
+    color=["leiden", "log1p_total_counts", "pct_counts_mt", "log1p_n_genes_by_counts"],
+    wspace=0.5,
+    ncols=2,
+)
+
+print("done")
+
+import subprocess
+subprocess.run(["xdg-open", "/home/tyler/sc_data/figures"])
