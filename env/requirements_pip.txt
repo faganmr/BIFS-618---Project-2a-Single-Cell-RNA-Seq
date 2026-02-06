@@ -1,0 +1,50 @@
+anndata @ file:///home/conda/feedstock_root/build_artifacts/anndata_1742996693987/work
+annoy==1.17.3
+array-api-compat @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_array-api-compat_1766921745/work
+cached-property @ file:///home/conda/feedstock_root/build_artifacts/cached_property_1615209429212/work
+colorama @ file:///home/conda/feedstock_root/build_artifacts/colorama_1733218098505/work
+contourpy @ file:///Users/runner/miniforge3/conda-bld/contourpy_1744743163818/work
+cycler @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_cycler_1764466758/work
+Cython==3.2.4
+exceptiongroup @ file:///home/conda/feedstock_root/build_artifacts/exceptiongroup_1763918002538/work
+fonttools @ file:///Users/runner/miniforge3/conda-bld/fonttools_1765632733856/work
+h5py @ file:///Users/runner/miniforge3/conda-bld/h5py_1764017341057/work
+igraph==1.0.0
+ImageIO==2.37.2
+joblib @ file:///home/conda/feedstock_root/build_artifacts/joblib_1765794027227/work
+kiwisolver @ file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_kiwisolver_1762488860/work
+lazy_loader==0.4
+legacy-api-wrap @ file:///home/conda/feedstock_root/build_artifacts/legacy-api-wrap_1762187530570/work
+leidenalg==0.11.0
+llvmlite==0.46.0
+matplotlib==3.10.8
+munkres==1.1.4
+natsort @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_natsort_1733880463/work
+networkx @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_networkx_1731521053/work
+numba @ file:///Users/runner/miniforge3/conda-bld/numba_1765808256194/work
+numpy @ file:///Users/runner/miniforge3/conda-bld/numpy_1747544633931/work/dist/numpy-2.2.6-cp310-cp310-macosx_11_0_arm64.whl#sha256=50a17562ef677de6531058e998e32487919c216e19ca4e1bdd86b0e1262251c1
+packaging @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_packaging_1769093650/work
+pandas @ file:///Users/runner/miniforge3/conda-bld/pandas_1759265743841/work
+patsy @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_patsy_1760998269/work
+pillow @ file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_pillow_1767353279/work
+pynndescent @ file:///home/conda/feedstock_root/build_artifacts/pynndescent_1734193530377/work
+pyparsing @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pyparsing_1769003998/work
+python-dateutil @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_python-dateutil_1751104122/work
+pytz @ file:///home/conda/feedstock_root/build_artifacts/pytz_1742920838005/work
+scanpy @ file:///home/conda/feedstock_root/build_artifacts/scanpy_1761040974135/work
+scikit-image==0.25.2
+scikit-learn @ file:///Users/runner/miniforge3/conda-bld/scikit-learn_1757406234687/work/dist/scikit_learn-1.7.2-cp310-cp310-macosx_11_0_arm64.whl#sha256=bb66f143da543e6bda8f24b531737ff6db838b0300a8c5847c06bc7b08fff666
+scipy @ file:///Users/runner/miniforge3/conda-bld/scipy-split_1739790705989/work/dist/scipy-1.15.2-cp310-cp310-macosx_11_0_arm64.whl#sha256=7edcf528c303a2d0aa5afa5be176589f18a84d21a8d85f1972553ab95cab0933
+scrublet==0.2.3
+seaborn @ file:///home/conda/feedstock_root/build_artifacts/seaborn-split_1733730015268/work
+session-info2 @ file:///home/conda/feedstock_root/build_artifacts/session-info2_1766426167778/work
+six @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_six_1753199211/work
+statsmodels @ file:///Users/runner/miniforge3/conda-bld/statsmodels_1764983144796/work
+texttable==1.7.0
+threadpoolctl @ file:///home/conda/feedstock_root/build_artifacts/threadpoolctl_1741878222898/work
+tifffile==2025.5.10
+tqdm @ file:///home/conda/feedstock_root/build_artifacts/tqdm_1735661334605/work
+typing_extensions @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_typing_extensions_1756220668/work
+tzdata @ file:///home/conda/feedstock_root/build_artifacts/python-tzdata_1765719872007/work
+umap-learn @ file:///Users/runner/miniforge3/conda-bld/umap-learn_1768311868610/work
+unicodedata2 @ file:///Users/runner/miniforge3/conda-bld/unicodedata2_1763054772701/work
