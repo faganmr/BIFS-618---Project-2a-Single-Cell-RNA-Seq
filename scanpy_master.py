@@ -26,12 +26,33 @@ def prompt_yes_no(question: str, default_yes: bool = False) -> bool:
 
 
 def prompt_output_dir() -> str:
-    # Ask the user where results should be saved
-    out = input("Enter output folder path to save results: ").strip()
-    if not out:
-        print("No output folder provided. Exiting.")
+    # Open a folder picker dialog so user can select output location
+
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError:
+        print("tkinter not available, falling back to console input.")
+        out = input("Enter output folder path to save results: ").strip()
+        if not out:
+            print("No output folder provided. Exiting.")
+            sys.exit(1)
+        return os.path.abspath(os.path.expanduser(out))
+
+    root = tk.Tk()
+    root.withdraw()
+
+    folder = filedialog.askdirectory(
+        title="Select output folder for Scanpy pipeline results"
+    )
+
+    root.destroy()
+
+    if not folder:
+        print("No folder selected. Exiting.")
         sys.exit(1)
-    return os.path.abspath(os.path.expanduser(out))
+
+    return os.path.abspath(folder)
 
 
 # ============================
@@ -79,7 +100,6 @@ def check_required_modules() -> None:
         print("")
         print("Suggested install commands:")
 
-        # Map import names to install names
         conda_pkgs = []
         pip_pkgs = []
 
@@ -93,7 +113,6 @@ def check_required_modules() -> None:
             elif m == "sklearn":
                 conda_pkgs.append("scikit-learn")
             else:
-                # Most packages can be installed by their standard name via pip
                 pip_pkgs.append(m)
 
         if conda_pkgs:
@@ -138,6 +157,7 @@ def main() -> None:
     run_scrublet = prompt_yes_no("Run doublet detection using scrublet?", default_yes=False)
 
     import scanpy as sc
+    import numpy as np
 
     # Create output folders
     fig_dir = os.path.join(output_dir, "figures")
@@ -290,7 +310,7 @@ def main() -> None:
     sc.tl.umap(adata)
 
     # Plot UMAP colored by sample
-    sc.pl.umap(adata, color="sample", size=2)
+    sc.pl.umap(adata, color="sample", size=2, save="_sample")
 
     # ============================
     # CLUSTERING
@@ -300,10 +320,10 @@ def main() -> None:
     sc.tl.leiden(adata, flavor="igraph", n_iterations=2)
 
     # Plot clusters on UMAP
-    sc.pl.umap(adata, color="leiden")
+    sc.pl.umap(adata, color="leiden", save="_leiden")
 
     # ============================
-    # MARKER GENES
+    # MARKER GENES AND DOTPLOT
     # ============================
 
     # Rank marker genes per cluster
@@ -312,32 +332,82 @@ def main() -> None:
     # Plot ranked marker genes
     sc.pl.rank_genes_groups(adata, n_genes=25, sharey=False)
 
-    # Plot PBMC marker panels using the full gene space
+    # Define marker genes for PBMC cell type interpretation
     pbmc_markers = {
-        "T_cells": ["CD3D", "CD3E"],
-        "CD4_T": ["IL7R", "CCR7"],
-        "CD8_NK": ["NKG7", "GNLY"],
-        "B_cells": ["MS4A1", "CD79A"],
-        "Monocytes": ["LYZ", "S100A8", "S100A9"],
-        "Dendritic": ["FCER1A", "CST3"],
-        "Platelets": ["PPBP", "PF4"],
+        "B cells": ["MS4A1", "CD79A"],
+        "CD4 T cells": ["IL7R", "CCR7"],
+        "CD8 T cells": ["NKG7", "GNLY"],
+        "CD14+ Monocytes": ["LYZ", "S100A8", "S100A9"],
+        "FCGR3A+ Monocytes": ["FCGR3A", "MS4A7"],
+        "Dendritic cells": ["FCER1A", "CST3"],
+        "Megakaryocytes": ["PPBP", "PF4"],
     }
 
+    # Keep only marker genes present in this dataset
     safe_markers = {}
     if adata.raw is not None:
-        for k, genes in pbmc_markers.items():
+        for label, genes in pbmc_markers.items():
             present = [g for g in genes if g in adata.raw.var_names]
             if present:
-                safe_markers[k] = present
+                safe_markers[label] = present
 
+    # Plot dotplot for marker genes across Leiden clusters
     if safe_markers:
-        sc.pl.dotplot(adata, safe_markers, groupby="leiden", standard_scale="var", use_raw=True)
+        sc.pl.dotplot(
+            adata,
+            safe_markers,
+            groupby="leiden",
+            standard_scale="var",
+            use_raw=True,
+            save="_markers",
+        )
 
+        # Plot marker genes on UMAP for quick visual confirmation
         marker_list = []
         for gene_list in safe_markers.values():
             marker_list.extend(gene_list)
 
-        sc.pl.umap(adata, color=marker_list, ncols=3, size=10, use_raw=True)
+        sc.pl.umap(
+            adata,
+            color=marker_list,
+            ncols=3,
+            size=10,
+            use_raw=True,
+            save="_marker_genes",
+        )
+
+    # ============================
+    # CELL TYPE ANNOTATION AND UMAP
+    # ============================
+
+    # Assign a cell type label to each Leiden cluster using marker gene expression
+    def mean_expr_raw(mask, genes):
+        x = adata.raw[mask, genes].X
+        try:
+            return float(x.mean())
+        except Exception:
+            return float(x.toarray().mean())
+
+    cluster_labels = {}
+    clusters = sorted(adata.obs["leiden"].unique().tolist())
+
+    for cl in clusters:
+        mask = adata.obs["leiden"] == cl
+        best_label = "Unknown"
+        best_score = -1.0
+
+        for label, genes in safe_markers.items():
+            score = mean_expr_raw(mask, genes)
+            if score > best_score:
+                best_score = score
+                best_label = label
+
+        cluster_labels[cl] = best_label
+
+    adata.obs["cell_type"] = adata.obs["leiden"].map(cluster_labels).astype("category")
+
+    # Plot UMAP colored by annotated cell types
+    sc.pl.umap(adata, color="cell_type", save="_cell_type")
 
     # ============================
     # FINAL OVERLAYS
@@ -349,7 +419,7 @@ def main() -> None:
         if c in adata.obs.columns:
             overlay_cols.append(c)
 
-    sc.pl.umap(adata, color=overlay_cols, wspace=0.5, size=3)
+    sc.pl.umap(adata, color=overlay_cols, wspace=0.5, size=3, save="_doublets")
 
     # Overlay QC metrics for a final sanity check
     qc_overlay = []
@@ -358,7 +428,7 @@ def main() -> None:
             qc_overlay.append(c)
 
     if qc_overlay:
-        sc.pl.umap(adata, color=["leiden"] + qc_overlay, wspace=0.5, ncols=2)
+        sc.pl.umap(adata, color=["leiden"] + qc_overlay, wspace=0.5, ncols=2, save="_qc")
 
     # ============================
     # SAVE OUTPUTS
