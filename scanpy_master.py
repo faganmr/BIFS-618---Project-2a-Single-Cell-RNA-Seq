@@ -11,48 +11,31 @@ import sys
 import subprocess
 from datetime import datetime
 
+import anndata as ad
+import scanpy as sc
+import scrublet as scr
+
+import tkinter as tk
+from tkinter import filedialog, messagebox
+
 
 # ============================
 # PROMPTS
 # ============================
 
-def prompt_yes_no(question: str, default_yes: bool = False) -> bool:
-    # Ask a yes or no question in the terminal
-    suffix = " [Y n]: " if default_yes else " [y N]: "
-    ans = input(question + suffix).strip().lower()
-    if ans == "":
-        return default_yes
-    return ans in {"y", "yes"}
+# Open file explorer for directory selection
+root = tk.Tk()
+root.withdraw()
+output_dir = filedialog.askdirectory(title="Select Output Directory")
+if not output_dir:
+    sys.exit("No directory selected")
+root.destroy()  # Clean up tkinter root
 
+sc.settings.figdir = f"{output_dir}/figures"
+sc.settings.autosave = True
+sc.settings.autoshow = False
 
-def prompt_output_dir() -> str:
-    # Open a folder picker dialog so user can select output location
-
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-    except ImportError:
-        print("tkinter not available, falling back to console input.")
-        out = input("Enter output folder path to save results: ").strip()
-        if not out:
-            print("No output folder provided. Exiting.")
-            sys.exit(1)
-        return os.path.abspath(os.path.expanduser(out))
-
-    root = tk.Tk()
-    root.withdraw()
-
-    folder = filedialog.askdirectory(
-        title="Select output folder for Scanpy pipeline results"
-    )
-
-    root.destroy()
-
-    if not folder:
-        print("No folder selected. Exiting.")
-        sys.exit(1)
-
-    return os.path.abspath(folder)
+sc.settings.set_figure_params(dpi=50, facecolor="white")
 
 
 # ============================
@@ -100,6 +83,7 @@ def check_required_modules() -> None:
         print("")
         print("Suggested install commands:")
 
+        # Map import names to install names
         conda_pkgs = []
         pip_pkgs = []
 
@@ -113,6 +97,7 @@ def check_required_modules() -> None:
             elif m == "sklearn":
                 conda_pkgs.append("scikit-learn")
             else:
+                # Most packages can be installed by their standard name via pip
                 pip_pkgs.append(m)
 
         if conda_pkgs:
@@ -146,18 +131,6 @@ def write_run_log(output_dir: str) -> None:
 def main() -> None:
     ensure_conda_env()
     check_required_modules()
-
-    output_dir = prompt_output_dir()
-
-    run_now = prompt_yes_no("Run the Scanpy pipeline now?", default_yes=True)
-    if not run_now:
-        print("Pipeline canceled by user.")
-        sys.exit(0)
-
-    run_scrublet = prompt_yes_no("Run doublet detection using scrublet?", default_yes=False)
-
-    import scanpy as sc
-    import numpy as np
 
     # Create output folders
     fig_dir = os.path.join(output_dir, "figures")
@@ -217,6 +190,32 @@ def main() -> None:
     keep_cols = [c for c in qc_cols if c in adata.obs.columns]
     adata.obs[keep_cols].to_csv(os.path.join(table_dir, "qc_metrics.csv"), index=True)
 
+    # QC Summary Dialog
+    msg = f"""
+    QC Summary:
+
+    Cells: {adata.n_obs}
+    Genes: {adata.n_vars}
+
+    Mitochondrial %:
+
+    Mean: {adata.obs.pct_counts_mt.mean():.2f}
+    Max:  {adata.obs.pct_counts_mt.max():.2f}
+
+    Hemoglobin %:
+    Mean: {adata.obs.pct_counts_hb.mean():.2f}
+    Max:  {adata.obs.pct_counts_hb.max():.2f}
+
+    Ribosomal %:
+    Mean: {adata.obs.pct_counts_ribo.mean():.2f}
+    Max:  {adata.obs.pct_counts_ribo.max():.2f}
+
+    Continue with analysis?
+    """
+
+    if not messagebox.askyesno("QC Check", msg):
+        sys.exit("Analysis stopped by user")
+
     # ============================
     # QC PLOTS
     # ============================
@@ -251,36 +250,50 @@ def main() -> None:
     sc.pp.filter_genes(adata, min_cells=3)
 
     # ============================
-    # DOUBLET DETECTION
+    # DOUBLET DETECTION (optional - runs automatically)
     # ============================
 
-    # Run scrublet if the user opts in
-    if run_scrublet:
-        try:
-            sc.pp.scrublet(adata, batch_key="sample")
-        except Exception as e:
-            print("Scrublet failed, continuing without doublet calls.")
-            print(str(e))
+    try:
+        sc.pp.scrublet(adata, batch_key="sample", random_state=42)
+    except Exception as e:
+        print("Scrublet failed, continuing without doublet calls.")
+        print(str(e))
 
     # ============================
     # NORMALIZATION
     # ============================
+    
+    # Save original counts
+    adata.layers["counts"] = adata.X.copy()
 
-    # Normalize total counts per cell
+    # Normalize total counts per cell to 10,000
     sc.pp.normalize_total(adata, target_sum=1e4)
 
     # Log transform normalized data
     sc.pp.log1p(adata)
 
-    # Store the full gene space for marker plots after HVG subsetting
+    # Save normalized full dataset
     adata.raw = adata
+
+    # Normalization Summary Prompt
+    msg = f"""
+    Normalization Summary:
+    Cells: {adata.n_obs}
+    Genes: {adata.n_vars}
+    Continue with analysis?
+    """
+
+    if not messagebox.askyesno("Normalization", msg):
+        sys.exit("Analysis stopped by user")
+
+    print("Normalization Complete")
 
     # ============================
     # HIGHLY VARIABLE GENES
     # ============================
 
     # Identify highly variable genes
-    sc.pp.highly_variable_genes(adata, n_top_genes=2000, batch_key="sample")
+    sc.pp.highly_variable_genes(adata, n_top_genes=2000, flavor="seurat_v3")
 
     # Plot HVG selection
     sc.pl.highly_variable_genes(adata)
@@ -310,7 +323,7 @@ def main() -> None:
     sc.tl.umap(adata)
 
     # Plot UMAP colored by sample
-    sc.pl.umap(adata, color="sample", size=2, save="_sample")
+    sc.pl.umap(adata, color="sample", size=2)
 
     # ============================
     # CLUSTERING
@@ -320,10 +333,10 @@ def main() -> None:
     sc.tl.leiden(adata, flavor="igraph", n_iterations=2)
 
     # Plot clusters on UMAP
-    sc.pl.umap(adata, color="leiden", save="_leiden")
+    sc.pl.umap(adata, color="leiden")
 
     # ============================
-    # MARKER GENES AND DOTPLOT
+    # MARKER GENES
     # ============================
 
     # Rank marker genes per cluster
@@ -332,24 +345,23 @@ def main() -> None:
     # Plot ranked marker genes
     sc.pl.rank_genes_groups(adata, n_genes=25, sharey=False)
 
-    # Define marker genes for PBMC cell type interpretation
+    # Plot PBMC marker panels using the full gene space
     pbmc_markers = {
-        "B cells": ["MS4A1", "CD79A"],
-        "CD4 T cells": ["IL7R", "CCR7"],
-        "CD8 T cells": ["NKG7", "GNLY"],
-        "CD14+ Monocytes": ["LYZ", "S100A8", "S100A9"],
-        "FCGR3A+ Monocytes": ["FCGR3A", "MS4A7"],
-        "Dendritic cells": ["FCER1A", "CST3"],
-        "Megakaryocytes": ["PPBP", "PF4"],
+        "T_cells": ["CD3D", "CD3E"],
+        "CD4_T": ["IL7R", "CCR7"],
+        "CD8_NK": ["NKG7", "GNLY"],
+        "B_cells": ["MS4A1", "CD79A"],
+        "Monocytes": ["LYZ", "S100A8", "S100A9"],
+        "Dendritic": ["FCER1A", "CST3"],
+        "Platelets": ["PPBP", "PF4"],
     }
 
-    # Keep only marker genes present in this dataset
     safe_markers = {}
     if adata.raw is not None:
-        for label, genes in pbmc_markers.items():
+        for k, genes in pbmc_markers.items():
             present = [g for g in genes if g in adata.raw.var_names]
             if present:
-                safe_markers[label] = present
+                safe_markers[k] = present
 
     # Plot dotplot for marker genes across Leiden clusters
     if safe_markers:
@@ -419,7 +431,7 @@ def main() -> None:
         if c in adata.obs.columns:
             overlay_cols.append(c)
 
-    sc.pl.umap(adata, color=overlay_cols, wspace=0.5, size=3, save="_doublets")
+    sc.pl.umap(adata, color=overlay_cols, wspace=0.5, size=3)
 
     # Overlay QC metrics for a final sanity check
     qc_overlay = []
@@ -428,7 +440,7 @@ def main() -> None:
             qc_overlay.append(c)
 
     if qc_overlay:
-        sc.pl.umap(adata, color=["leiden"] + qc_overlay, wspace=0.5, ncols=2, save="_qc")
+        sc.pl.umap(adata, color=["leiden"] + qc_overlay, wspace=0.5, ncols=2)
 
     # ============================
     # SAVE OUTPUTS
