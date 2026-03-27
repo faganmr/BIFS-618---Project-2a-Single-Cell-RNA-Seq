@@ -1,0 +1,379 @@
+# ============================
+# IMPORTS / SETUP
+# ============================
+
+from __future__ import annotations  # Allows forward references in type hints (mostly harmless here)
+
+# Tkinter file dialog for picking folders/files via GUI
+from tkinter import filedialog
+
+import anndata as ad          # AnnData structure (not used directly; Scanpy returns AnnData)
+import scanpy as sc           # Main single-cell analysis library
+import scrublet as scr        # Doublet detection (you are using Scanpy's wrapper, not scr directly)
+
+# Tkinter UI components for popup prompts
+import tkinter as tk
+from tkinter import messagebox
+
+import sys                    # Used for sys.exit() and printing sys.executable
+
+# ============================
+# OUTPUT DIRECTORY SELECTION
+# ============================
+
+# Create a Tk root window (required for file dialogs) and immediately hide it
+root = tk.Tk()
+root.withdraw()
+
+# Opens system file explorer dialog so user can choose an output directory
+output_dir = filedialog.askdirectory(title="Select Output Directory")
+
+# If user cancels folder selection, stop the program
+if not output_dir:
+    sys.exit("No directory selected")
+
+# IMPORTANT:
+# You set Scanpy's figure output directory to "<selected folder>/figures"
+# BUT you do NOT ensure that directory exists yet.
+# Also: you later open "/home/tyler/sc_data/figures" instead of this chosen folder.
+sc.settings.figdir = f"{output_dir}/figures"
+sc.settings.autosave = True   # Save plots automatically to sc.settings.figdir
+sc.settings.autoshow = False  # Do not pop up plots interactively (useful in scripts)
+
+# Print the Python interpreter path currently running the script.
+# This is a good environment sanity check (should point to conda env Python).
+print(sys.executable)
+
+# Set plotting parameters (dpi, background). This affects Scanpy matplotlib plots.
+sc.settings.set_figure_params(dpi=50, facecolor="white")
+
+
+# ============================
+# LOAD DATA
+# ============================
+
+# Loads the built-in PBMC3k dataset shipped with Scanpy
+# This is NOT reading your local 10x mtx files; it's Scanpy's canned example dataset.
+adata = sc.datasets.pbmc3k()
+print(adata)
+
+# Add a sample label column so code can support multiple batches later
+# adata.obs is the per-cell metadata table (rows=cells)
+adata.obs["sample"] = "pbmc3k"
+adata.obs["sample"] = adata.obs["sample"].astype("category")  # Store as categorical (more efficient)
+
+print(adata)
+print(adata.obs["sample"].value_counts())
+
+
+# ============================
+# QUALITY CONTROL METRICS
+# ============================
+
+# Create boolean flags per gene in adata.var (per-gene metadata table)
+# adata.var_names is the gene identifier list (strings)
+adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")  # mitochondrial genes
+adata.var["ribo"] = adata.var_names.str.upper().str.startswith(("RPS", "RPL"))  # ribosomal
+adata.var["hb"] = adata.var_names.str.contains(r"^HB(?!P)", regex=True)  # hemoglobin (HB but not HBP)
+
+# Compute QC metrics and store them in adata.obs:
+# - total_counts, n_genes_by_counts, pct_counts_mt, pct_counts_ribo, pct_counts_hb, etc.
+# log1p=True also adds log1p_* QC columns to obs
+sc.pp.calculate_qc_metrics(
+    adata,
+    qc_vars=["mt", "ribo", "hb"],
+    inplace=True,
+    log1p=True
+)
+
+# Choose a subset of QC columns to export to CSV
+qc_cols = ["n_genes_by_counts", "total_counts", "pct_counts_mt"]
+
+# qc_df is a pandas DataFrame view of those columns from adata.obs
+qc_df = adata.obs[qc_cols]
+
+# BUG / INCONSISTENCY:
+# You are saving the CSV to a hard-coded path, ignoring output_dir.
+# Also, this will overwrite the file every run.
+qc_df.to_csv("/home/tyler/sc_data/qc_metrics.csv")
+
+
+# ============================
+# QC SUMMARY DIALOG (GUI POPUP)
+# ============================
+
+# You create a NEW tk root again here. Not fatal, but redundant.
+# Better: reuse the first root.
+root = tk.Tk()
+root.withdraw()
+
+# Build a multi-line summary message from QC columns created earlier
+msg = f"""
+QC Summary:
+
+Cells: {adata.n_obs}
+Genes: {adata.n_vars}
+
+Mitochondrial %:
+Mean: {adata.obs.pct_counts_mt.mean():.2f}
+Max:  {adata.obs.pct_counts_mt.max():.2f}
+
+Hemoglobin %:
+Mean: {adata.obs.pct_counts_hb.mean():.2f}
+Max:  {adata.obs.pct_counts_hb.max():.2f}   
+
+Ribosomal %:
+Mean: {adata.obs.pct_counts_ribo.mean():.2f}
+Max:  {adata.obs.pct_counts_ribo.max():.2f}
+
+Continue with analysis?
+"""
+
+# askyesno returns True/False depending on user click
+# If user clicks "No", we stop the script immediately.
+if not messagebox.askyesno("QC Check", msg):
+    sys.exit("Analysis stopped by user")
+
+
+# ============================
+# PREPROCESSING
+# ============================
+
+# Makes gene names unique by appending suffixes where needed.
+# You call this TWICE (redundant).
+# You only need to do it once, and usually right after loading.
+adata.var_names_make_unique()
+adata.var_names_make_unique()
+
+# Plot the top expressed genes across cells (diagnostic)
+# This will save to sc.settings.figdir because autosave=True
+sc.pl.highest_expr_genes(adata, n_top=20)
+
+
+# ============================
+# QC PLOTS
+# ============================
+
+# Violin plots for key QC metrics
+sc.pl.violin(
+    adata,
+    ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
+    jitter=0.4,
+    multi_panel=True,
+)
+
+# Scatter plot: counts vs genes with mitochondrial % as color
+sc.pl.scatter(adata, "total_counts", "n_genes_by_counts", color="pct_counts_mt")
+
+
+# ============================
+# FILTERING
+# ============================
+
+# Filter low-quality cells and low-information genes
+# NOTE: These modify adata in place (remove cells/genes)
+sc.pp.filter_cells(adata, min_genes=200)
+sc.pp.filter_genes(adata, min_cells=3)
+
+
+# ============================
+# DOUBLETS (Scrublet)
+# ============================
+
+# Scanpy wrapper for Scrublet; it adds columns to adata.obs like:
+# - doublet_score
+# - predicted_doublet
+# It may also create adata.uns entries.
+# batch_key="sample" is okay, though you only have one sample here.
+sc.pp.scrublet(adata, batch_key="sample")
+
+
+# ============================
+# NORMALIZATION / LOG TRANSFORM
+# ============================
+
+# Save raw counts into a layer before normalization (good practice)
+adata.layers["counts"] = adata.X.copy()
+
+# You normalize twice:
+# 1) default normalize_total (target_sum defaults to 1e4)
+# 2) normalize_total(target_sum=1e4) again
+# The first call is redundant.
+sc.pp.normalize_total(adata)
+sc.pp.normalize_total(adata, target_sum=1e4)
+
+# Log-transform the normalized data (standard for Scanpy pipeline)
+sc.pp.log1p(adata)
+
+# User confirmation dialog after normalization
+msg = f"""
+Normalization Summary:
+Cells: {adata.n_obs}
+Genes: {adata.n_vars}
+Continue with analysis?
+"""
+
+if not messagebox.askyesno("Normalization", msg):
+    sys.exit("Analysis stopped by user")
+
+print("Normalization Complete")
+
+
+# ============================
+# FEATURE SELECTION (HVGs)
+# ============================
+
+# Identify highly variable genes (HVGs)
+# This marks adata.var["highly_variable"] = True/False.
+# With batch_key="sample", it can do batch-aware selection (not critical here).
+sc.pp.highly_variable_genes(adata, n_top_genes=2000, batch_key="sample")
+
+# Plot HVG diagnostics
+sc.pl.highly_variable_genes(adata)
+
+print("Feature Selection Complete")
+
+# IMPORTANT NOTE:
+# You are identifying HVGs but NOT subsetting the matrix to HVGs.
+# Many pipelines do:
+# adata = adata[:, adata.var["highly_variable"]].copy()
+# Not required, but common.
+# Scanpy may still use HVGs for PCA if configured; being explicit is clearer.
+
+
+# ============================
+# PCA / UMAP
+# ============================
+
+# PCA on adata.X (currently log1p normalized)
+# Produces:
+# - adata.obsm["X_pca"] : cell coordinates in PC space
+# - adata.uns["pca"] etc.
+sc.tl.pca(adata)
+
+# Scree plot: variance explained by PCs (does NOT show gene names)
+sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True)
+
+# Plot cells in PCA space colored by marker genes (requires those genes exist)
+# If a gene isn't in adata.var_names, this will throw KeyError
+sc.pl.pca(adata, color=["MS4A1", "CD3D"])
+
+# Build kNN graph in PCA space
+# Default n_neighbors=15 and n_pcs=50 (or available)
+# Produces:
+# - adata.obsp["distances"]
+# - adata.obsp["connectivities"]
+sc.pp.neighbors(adata)
+
+# Compute UMAP embedding from kNN graph
+# Produces:
+# - adata.obsm["X_umap"]
+sc.tl.umap(adata)
+
+# Plot UMAP colored by sample (only one sample here)
+sc.pl.umap(adata, color="sample", size=2)
+print("Neighbors/UMAP Complete")
+
+
+# ============================
+# CLUSTERING (LEIDEN) -- CURRENTLY COMMENTED OUT
+# ============================
+
+# These two lines are what CREATE the 'leiden' column:
+# sc.tl.leiden(...) -> adds adata.obs["leiden"]
+# sc.pl.umap(..., color=["leiden"]) -> visualizes clusters
+
+# RIGHT NOW THEY ARE COMMENTED OUT, SO 'leiden' DOES NOT EXIST.
+# That is why you get KeyError: 'leiden'.
+
+# sc.tl.leiden(adata, flavor="igraph", n_iterations=2)
+# sc.pl.umap(adata, color=["leiden"])
+# print("Clustering Complete")
+
+
+# ============================
+# ANNOTATION -- CURRENTLY BROKEN BECAUSE LEIDEN DOESN'T EXIST
+# ============================
+
+# This line does NOT create anything.
+# It attempts to ACCESS adata.obs["leiden"] and will crash if missing.
+adata.obs["leiden"]
+
+# Find marker genes per cluster
+# This requires:
+# - adata.obs["leiden"] to exist
+# - sufficient cells per cluster
+sc.tl.rank_genes_groups(
+    adata,
+    groupby="leiden",
+    method="wilcoxon"
+)
+
+# Plot top marker genes per cluster
+sc.pl.rank_genes_groups(adata, n_genes=25, sharey=False)
+
+# Marker sets for PBMC cell types (used for interpretation)
+pbmc_markers = {
+    "T cells": ["CD3D", "CD3E"],
+    "CD4 T": ["IL7R", "CCR7"],
+    "CD8 / NK": ["NKG7", "GNLY"],
+    "B cells": ["MS4A1", "CD79A"],
+    "Monocytes": ["LYZ", "S100A8", "S100A9"],
+    "Dendritic cells": ["FCER1A", "CST3"],
+    "Platelets": ["PPBP", "PF4"],
+}
+
+# Dotplot of marker expression by cluster
+# Will error if any marker gene isn't present in adata.var_names
+sc.pl.dotplot(
+    adata,
+    pbmc_markers,
+    groupby="leiden",
+    standard_scale="var"
+)
+
+# UMAP plots colored by each marker gene
+sc.pl.umap(
+    adata,
+    color=sum(pbmc_markers.values(), []),
+    ncols=3,
+    size=10
+)
+
+
+# ============================
+# PLOTS INCLUDING DOUBLETS (SAFE CHECK)
+# ============================
+
+# Start list of columns to color UMAP by
+cols = ["leiden"]
+
+# Append Scrublet outputs if they exist
+for c in ["predicted_doublet", "doublet_score"]:
+    if c in adata.obs.columns:
+        cols.append(c)
+
+# UMAP colored by leiden + doublet columns (if present)
+sc.pl.umap(adata, color=cols, wspace=0.5, size=3)
+
+# UMAP colored by leiden + QC metrics
+sc.pl.umap(
+    adata,
+    color=["leiden", "log1p_total_counts", "pct_counts_mt", "log1p_n_genes_by_counts"],
+    wspace=0.5,
+    ncols=2,
+)
+
+print("done")
+
+
+# ============================
+# OPEN FIGURES FOLDER (CURRENTLY WRONG PATH)
+# ============================
+
+import subprocess
+
+# BUG:
+# You're opening a hard-coded directory that may not match output_dir.
+# You should open sc.settings.figdir or output_dir.
+subprocess.run(["xdg-open", "/home/tyler/sc_data/figures"])

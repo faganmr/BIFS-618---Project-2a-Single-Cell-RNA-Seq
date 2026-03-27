@@ -1,0 +1,217 @@
+# Core scverse libraries
+from __future__ import annotations
+
+import anndata as ad
+import scanpy as sc
+import scrublet as scr
+
+import tkinter as tk
+from tkinter import filedialog
+
+# Prompt for output directory
+root = tk.Tk()
+root.withdraw()
+output_dir = filedialog.askdirectory(title="Select Output Directory")
+if not output_dir:
+    sys.exit("No directory selected")
+
+sc.settings.figdir = f"{output_dir}/figures"
+sc.settings.autosave = True
+sc.settings.autoshow = False
+
+import sys
+print(sys.executable)
+
+sc.settings.set_figure_params(dpi=50, facecolor="white")
+
+
+# LOAD LOCAL 10x DATA (PBMC3k)
+
+adata = sc.datasets.pbmc3k()
+print(adata)
+
+# Add a sample label
+adata.obs["sample"] = "pbmc3k"
+adata.obs["sample"] = adata.obs["sample"].astype("category")
+
+print(adata)
+print(adata.obs["sample"].value_counts())
+
+
+# QUALITY CONTROL
+
+adata.var["mt"] = adata.var_names.str.upper().str.startswith("MT-")
+adata.var["ribo"] = adata.var_names.str.upper().str.startswith(("RPS", "RPL"))
+adata.var["hb"] = adata.var_names.str.contains(r"^HB(?!P)", regex=True)
+
+sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo", "hb"], inplace=True, log1p=True)
+
+qc_cols = ["n_genes_by_counts", "total_counts", "pct_counts_mt"]
+
+qc_df = adata.obs[qc_cols]
+qc_df.to_csv(f"{output_dir}/qc_metrics.csv")
+
+
+# QC Summary Dialog
+
+from tkinter import messagebox
+
+msg = f"""
+QC Summary:
+
+Cells: {adata.n_obs}
+Genes: {adata.n_vars}
+
+Mitochondrial %:
+
+Mean: {adata.obs.pct_counts_mt.mean():.2f}
+Max:  {adata.obs.pct_counts_mt.max():.2f}
+
+Hemoglobin %:
+Mean: {adata.obs.pct_counts_hb.mean():.2f}
+Max:  {adata.obs.pct_counts_hb.max():.2f}   
+
+Ribosomal %:
+Mean: {adata.obs.pct_counts_ribo.mean():.2f}
+Max:  {adata.obs.pct_counts_ribo.max():.2f}
+
+Continue with analysis?
+"""
+
+if not messagebox.askyesno("QC Check", msg):
+    sys.exit("Analysis stopped by user")
+
+# ============================
+# PREPROCESSING
+# ============================
+
+# Makes gene names unique by appending suffixes where needed.
+# You call this TWICE (redundant).
+# You only need to do it once, and usually right after loading.
+adata.var_names_make_unique()
+adata.var_names_make_unique()
+
+# Plot the top expressed genes across cells (diagnostic)
+# This will save to sc.settings.figdir because autosave=True
+sc.pl.highest_expr_genes(adata, n_top=20)
+
+
+# Violin plots
+sc.pl.violin(
+    adata,
+    ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
+    jitter=0.4,
+    muSlti_panel=True,
+)
+
+sc.pl.scatter(adata, "total_counts", "n_genes_by_counts", color="pct_counts_mt")
+
+sc.pp.filter_cells(adata, min_genes=200)
+sc.pp.filter_genes(adata, min_cells=3)
+
+
+# DOUBLETS (optional)
+# Added random_state=42 for reproducibility in doublet simulation
+sc.pp.scrublet(adata, batch_key="sample", random_state=42)
+
+
+# NORMALIZATION
+
+adata.layers["counts"] = adata.X.copy()
+sc.pp.normalize_total(adata)
+sc.pp.log1p(adata)
+
+msg = f"""
+Normalization Summary:
+Cells: {adata.n_obs}
+Genes: {adata.n_vars}
+Continue with analysis?
+"""
+
+if not messagebox.askyesno("Normalization", msg):
+    sys.exit("Analysis stopped by user")
+
+
+print("Normalization Complete")
+
+
+# FEATURE SELECTION
+
+sc.pp.highly_variable_genes(adata, n_top_genes=2000, batch_key="sample")
+sc.pl.highly_variable_genes(adata)
+
+print("Feature Selection Complete")
+
+
+# PCA / UMAP / CLUSTERING
+# Added random_state=42 to PCA, neighbors, UMAP, and Leiden for full reproducibility
+sc.tl.pca(adata, random_state=42)
+sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True)
+
+sc.pp.neighbors(adata, random_state=42)
+sc.tl.umap(adata, random_state=42)
+
+sc.pl.umap(adata, color="sample", size=2)
+print("Neighbors/UMAP Complete")
+
+sc.tl.leiden(adata, flavor="igraph", n_iterations=2, random_state=42)
+sc.pl.umap(adata, color=["leiden"])
+print("Clustering Complete")
+
+
+# ANNOTATION
+# Identify differentially expressed genes (markers) for each cluster
+sc.tl.rank_genes_groups(adata, 'leiden', method='t-test')
+# Plot the top marker genes for each cluster
+sc.pl.rank_genes_groups(adata, n_genes=25, sharey=False)
+cluster_to_celltype = {
+    '0': 'CD4 T cells',
+    '1': 'CD14+ Monocytes',
+    '2': 'B cells',
+    '3': 'CD8 T cells',
+    '4': 'NK cells',
+    '5': 'FCGR3A+ Monocytes',
+    '6': 'Dendritic cells',
+    '7': 'Megakaryocytes'
+}
+
+# Dotplot of marker expression by cluster
+# Will error if any marker gene isn't present in adata.var_names
+sc.pl.dotplot(
+    adata,
+    pbmc_markers,
+    groupby="leiden",
+    standard_scale="var"
+)
+
+adata.obs["cell_type"] = (
+    adata.obs["leiden"].astype(str)
+    .map(cluster_to_celltype)
+    .fillna("Unknown")
+    .astype("category")
+)
+sc.pl.umap(adata, color=["cell_type"])
+print("Annotation Complete")
+
+
+
+# PLOTS (safe: only plot scrublet columns if they exist)
+
+cols = ["leiden"]
+for c in ["predicted_doublet", "doublet_score"]:
+    if c in adata.obs.columns:
+        cols.append(c)
+
+sc.pl.umap(adata, color=cols, wspace=0.5, size=3)
+
+sc.pl.umap(
+    adata,
+    color=["leiden", "log1p_total_counts", "pct_counts_mt", "log1p_n_genes_by_counts", "cell_type"],
+    wspace=0.5,
+    ncols=2,
+)
+
+print("done")
+
+import subprocess
+subprocess.run(["xdg-open", sc.settings.figdir])
