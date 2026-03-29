@@ -93,8 +93,6 @@ The run log records matrix dimensions at this stage. Expected values for PBMC3k:
 | Raw load | 2,700 | 32,738 |
 | After filtering | 2,700 | 13,714 |
 
-> Confirm these values against your own `run_log.txt` output.
-
 ---
 
 ## References
