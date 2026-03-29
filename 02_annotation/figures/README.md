@@ -10,7 +10,7 @@ This folder contains all visualizations generated during the annotation stage of
 | File | Description |
 |------|-------------|
 | `dotplot_markers.png` | Dot plot of curated PBMC marker gene expression across Leiden clusters, showing both mean expression level and fraction of cells expressing each gene |
-| `umap_marker_genes.png` | UMAP panels displaying the expression of individual marker genes across all cells, arranged in a 3-column grid |
+| `umap_marker_genes.pdf` | UMAP panels displaying the expression of individual marker genes across all cells, arranged in a 3-column grid |
 | `umap_cell_type.png` | Final UMAP plot colored by assigned cell type labels, representing the completed output of the annotation workflow |
 
 ---
