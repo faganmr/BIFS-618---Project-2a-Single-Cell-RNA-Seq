@@ -9,9 +9,46 @@ The dataset used is the 10x Genomics PBMC 3k dataset
 ## Project Structure
 
 ```text
-BIOT 670I---Project-2a-Single-Cell-RNA-Seq/
+BIFS-618---Project-2a-Single-Cell-RNA-Seq/
 │
 ├── README.md
+│
+├── 00_raw_data/
+│   ├── README.md
+│   ├── qc_metrics.csv
+│   └── figures/
+│       ├── README.md
+│       ├── highest_expr_genes.png
+│       ├── scatter.png
+│       └── violin.png
+│
+├── 01_clustering/
+│   ├── README.md
+│   └── figures/
+│       ├── README.md
+│       ├── hvg_plot.png
+│       ├── pca_variance_ratio.png
+│       └── umap_qc_overlay.png
+│
+├── 02_annotation/
+│   ├── README.md
+│   └── figures/
+│       ├── README.md
+│       ├── dotplot_markers.png
+│       ├── umap_cell_type.png
+│       └── umap_marker_genes.pdf
+│
+├── Draft_Code/
+│   ├── README.md
+│   ├── Draft Code.txt
+│   ├── DraftCode_DialogBoxes.txt
+│   ├── The_Gruesome_Details.txt
+│   ├── draftcode_v1.txt
+│   ├── draftcodedb.txt
+│   ├── pipeline.sh
+│   ├── scanpy_master.py
+│   ├── scanpy_master_logs_seed_v2.py
+│   └── scanpy_master_logs_v2.py
 │
 └── Pipeline/
     ├── README.md
